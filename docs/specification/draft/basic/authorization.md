@@ -118,10 +118,28 @@ version.
 
 For example: `MCP-Protocol-Version: 2024-11-05`
 
-#### 2.3.2 Fallbacks for Servers without Metadata Discovery
+#### 2.3.2 Authorization Base URL
+
+The authorization base URL **MUST** be determined from the [SSE
+endpoint]({{< ref "specification/draft/basic/transports#http-with-sse" >}}) URL by
+discarding any existing `path` component. For example:
+
+If the SSE endpoint is `https://api.example.com/v1/sse`, then:
+
+- The authorization base URL is `https://api.example.com`
+- The metadata endpoint **MUST** be at
+  `https://api.example.com/.well-known/oauth-authorization-server`
+
+This ensures authorization endpoints are consistently located at the root level of the
+domain serving the SSE endpoint, regardless of any path components in the SSE endpoint
+URL.
+
+#### 2.3.3 Fallbacks for Servers without Metadata Discovery
 
 For servers that do not implement OAuth 2.0 Authorization Server Metadata, clients
-**MUST** use the following default endpoint paths relative to the server's base URL:
+**MUST** use the following default endpoint paths relative to the authorization base URL
+(as defined in [Section
+2.3.2]({{< ref "specification/draft/basic/authorization#232-authorization-base-url" >}})):
 
 | Endpoint               | Default Path | Description                          |
 | ---------------------- | ------------ | ------------------------------------ |
@@ -129,50 +147,41 @@ For servers that do not implement OAuth 2.0 Authorization Server Metadata, clien
 | Token Endpoint         | /token       | Used for token exchange & refresh    |
 | Registration Endpoint  | /register    | Used for dynamic client registration |
 
+For example, with an SSE endpoint of `https://api.example.com/v1/sse`, the default
+endpoints would be:
+
+- `https://api.example.com/authorize`
+- `https://api.example.com/token`
+- `https://api.example.com/register`
+
 Clients **MUST** first attempt to discover endpoints via the metadata document before
 falling back to default paths. When using default paths, all other protocol requirements
 remain unchanged.
 
-### 2.4 Dynamic Client Registration
+### 2.3 Dynamic Client Registration
 
-MCP authorization makes use of the
+MCP clients and servers **SHOULD** support the
 [OAuth 2.0 Dynamic Client Registration Protocol](https://datatracker.ietf.org/doc/html/rfc7591)
-to allow MCP clients to obtain OAuth client IDs without user interaction.
-
-- MCP clients **SHOULD** support
-  [OAuth 2.0 Dynamic Client Registration Protocol](https://datatracker.ietf.org/doc/html/rfc7591)
-- MCP servers with non-localhost redirect URIs **SHOULD** support Dynamic Client
-  Registration.
-- MCP servers with localhost redirect URIs **MAY** support Dynamic Client Registration.
-
-Note that it is not required to support Dynamic Client Registration. MCP clients that do
-not support Dynamic Client Registration need to provide alternative ways to obtain a
-client id (and if applicable client secret).
-
-#### 2.4.1 Localhost Redirect URIs
-
-When using localhost redirect URIs (http://localhost:{port} or http://127.0.0.1:{port}),
-clients:
-
-- Dynamic registration is **OPTIONAL** (a client ID is not required).
-- **MAY** proceed directly to authorization.
-- **SHOULD** be considered public clients and not store any clients secrets.
-
-This exception for localhost is explicitly supported by OAuth 2.1 for public clients and
-provides a secure flow through the combination of PKCE and localhost-only redirects.
-
-#### 2.4.2 Non-Localhost Redirect URIs
-
-For all other redirect URIs, MCP clients and servers **SHOULD** support dynamic client
-registration. This provides a standardized way for clients to automatically register with
-new servers, which is crucial for MCP because:
+to allow MCP clients to obtain OAuth client IDs without user interaction. This provides a
+standardized way for clients to automatically register with new servers, which is crucial
+for MCP because:
 
 - Clients cannot know all possible servers in advance
 - Manual registration would create friction for users
 - It enables seamless connection to new servers
 - Servers can implement their own registration policies
 
-### 2.5 Authorization Flow Steps
+Any MCP servers that _do not_ support Dynamic Client Registration need to provide
+alternative ways to obtain a client ID (and, if applicable, client secret). For one of
+these servers, MCP clients will have to either:
+
+1. Hardcode a client ID (and, if applicable, client secret) specifically for that MCP
+   server, or
+2. Present a UI to users that allows them to enter these details, after registering an
+   OAuth client themselves (e.g., through a configuration interface hosted by the
+   server).
+
+### 2.4 Authorization Flow Steps
 
 The complete Authorization flow proceeds as follows:
 
@@ -189,7 +198,7 @@ sequenceDiagram
         M->>C: 404 (Use default endpoints)
     end
 
-    alt Non-Localhost Redirect URI
+    alt Dynamic Client Registration
         C->>M: POST /register
         M->>C: Client Credentials
     end
@@ -205,7 +214,7 @@ sequenceDiagram
     C->>M: API Requests with Access Token
 ```
 
-#### 2.5.1 Decision Flow Overview
+#### 2.4.1 Decision Flow Overview
 
 ```mermaid
 flowchart TD
@@ -213,17 +222,13 @@ flowchart TD
     B -->|Available| C[Use Metadata Endpoints]
     B -->|Not Available| D[Use Default Endpoints]
 
-    C --> E{Check Redirect URI}
-    D --> E
-
-    E -->|Localhost| F[Skip Registration]
-    E -->|Non-localhost| G{Check Registration Endpoint}
+    C --> G{Check Registration Endpoint}
+    D --> G
 
     G -->|Available| H[Perform Dynamic Registration]
     G -->|Not Available| I[Alternative Registration Required]
 
-    F --> J[Start OAuth Flow]
-    H --> J
+    H --> J[Start OAuth Flow]
     I --> J
 
     J --> K[Generate PKCE Parameters]
@@ -233,9 +238,9 @@ flowchart TD
     N --> O[Use Access Token]
 ```
 
-### 2.6 Access Token Usage
+### 2.5 Access Token Usage
 
-#### 2.6.1 Token Requirements
+#### 2.5.1 Token Requirements
 
 Access token handling **MUST** conform to
 [OAuth 2.1 Section 5](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-12#section-5)
@@ -258,7 +263,7 @@ Host: mcp.example.com
 Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
 ```
 
-#### 2.6.2 Token Handling
+#### 2.5.2 Token Handling
 
 Resource servers **MUST** validate access tokens as described in
 [Section 5.2](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1-12#section-5.2).
@@ -267,7 +272,7 @@ If validation fails, servers **MUST** respond according to
 error handling requirements. Invalid or expired tokens **MUST** receive a HTTP 401
 response.
 
-### 2.7 Security Considerations
+### 2.6 Security Considerations
 
 The following security requirements **MUST** be implemented:
 
@@ -277,7 +282,7 @@ The following security requirements **MUST** be implemented:
 4. Servers **MUST** validate redirect URIs to prevent open redirect vulnerabilities
 5. Redirect URIs **MUST** be either localhost URLs or HTTPS URLs
 
-### 2.8 Error Handling
+### 2.7 Error Handling
 
 Servers **MUST** return appropriate HTTP status codes for authorization errors:
 
@@ -287,22 +292,22 @@ Servers **MUST** return appropriate HTTP status codes for authorization errors:
 | 403         | Forbidden    | Invalid scopes or insufficient permissions |
 | 400         | Bad Request  | Malformed authorization request            |
 
-### 2.9 Implementation Requirements
+### 2.8 Implementation Requirements
 
 1. Implementations **MUST** follow OAuth 2.1 security best practices
 2. PKCE is **REQUIRED** for all clients
 3. Token rotation **SHOULD** be implemented for enhanced security
 4. Token lifetimes **SHOULD** be limited based on security requirements
 
-### 2.10 Third-Party Authorization Flow
+### 2.9 Third-Party Authorization Flow
 
-#### 2.10.1 Overview
+#### 2.9.1 Overview
 
 MCP servers **MAY** support delegated authorization through third-party authorization
 servers. In this flow, the MCP server acts as both an OAuth client (to the third-party
 auth server) and an OAuth authorization server (to the MCP client).
 
-#### 2.10.2 Flow Description
+#### 2.9.2 Flow Description
 
 The third-party authorization flow comprises these steps:
 
@@ -336,7 +341,7 @@ sequenceDiagram
     M->>C: MCP access token
 ```
 
-#### 2.10.3 Session Binding Requirements
+#### 2.9.3 Session Binding Requirements
 
 MCP servers implementing third-party authorization **MUST**:
 
@@ -345,7 +350,7 @@ MCP servers implementing third-party authorization **MUST**:
 3. Implement appropriate token lifecycle management
 4. Handle third-party token expiration and renewal
 
-#### 2.10.4 Security Considerations
+#### 2.9.4 Security Considerations
 
 When implementing third-party authorization, servers **MUST**:
 
